@@ -1,0 +1,3 @@
+Ld Fa, 0(Ra)
+Beq Rs, Rt, offset
+Add Rd, Rs, Rt

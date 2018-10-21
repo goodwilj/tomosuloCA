@@ -71,7 +71,7 @@ def configParser(fileName):
     Parse the assembly file and split instructions
     @param instructions: List of lines containing instructions
 """
-def fileParser(instructions):
+def instParser(instructions):
     commands = ["ld","sd","beq","bne","add","add.d","addi","sub","sub.d","mult.d"]
     commentVal = '"' ## Comment key
 
@@ -123,4 +123,4 @@ def fileParser(instructions):
 
 if __name__ == '__main__':
     config,ARFint,ARFfloat,Memory,instructions = configParser('config.txt')
-    fileParser(instructions)
+    instParser(instructions)

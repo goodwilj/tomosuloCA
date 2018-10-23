@@ -27,8 +27,8 @@ def configParser(fileName):
         ### numRs CyclesInEx CyclesInMem numFUs ###
         config[line[0].lower()] = [int(j) for j in line[1:]]
 
-    config['ROBentries'] = lines[6].split()[1]
-    config['CDBBuffEntries'] = lines[7].split()[1]
+    config['ROBentries'] = lines[6].split()[-1]
+    config['CDBBuffEntries'] = lines[7].split()[-1]
 
     regs = lines[8].split()
     for reg in regs:

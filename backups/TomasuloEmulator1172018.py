@@ -183,62 +183,16 @@ def execute(cc):
             
 
 def issue(inst,instNum):
-    global ROB, ROBtail, RATint, RATfloat, ARFint, ARFfloat
+    global ROB, ROBtail, RATint, RATfloat, ARFint, ARFfloat, IntAddRs, FPAddRs, FPMultRs, LSRs
     if ROBtail-ROBhead<int(config['ROBentries']):
         t = (inst['Type'])
+
         if t in ["add","addi","sub","beq", "bne"] and len(IntAddRs)<config['intadd'][0]:
 
             if t in ["add","addi","sub"]:
-                
-                renameddest = 'ROB'+str(ROBtail)
-                
-                #Read RAT and dispatch in Reservation station
-                rs = RATint[inst['Rs']]
-                rt = RATint[inst['Rt']]
-                rsName = re.split('(\d+)',RATint[inst['Rs']])
-                rtName = re.split('(\d+)',RATint[inst['Rt']])
-
-                rsnum = int(rsName[1])
-                rtnum = int(rtName[1])
-                
-                #print(rsName)
-                #print(rtName)
-                
-
-                ##both dependent on instructions
-                if rsName[0]=="ROB" and rtName[0]=="ROB":
-                    
-                    if ROB[rsnum]['Value']==None and ROB[rtnum]['Value']==None:
-                        IntAddRs.append({'instNum': instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': rt,'Val1':None,'Val2':None})
-                    elif ROB[rsnum]['Value']!=None and ROB[rtnum]['Value']==None:
-                        IntAddRs.append({'instNum': instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': rt,'Val1':ROB[rsnum]['Value'],'Val2':None})
-                    elif ROB[rsnum]['Value']==None and ROB[rtnum]['Value']!=None:
-                        IntAddRs.append({'instNum': instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': rt,'Val1':None,'Val2':ROB[rtnum]['Value']})
-                    else:
-                        IntAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ROB[rsnum]['Value'],'Val2':ROB[rtnum]['Value']})
-
-                #Only source with ROB
-                elif rsName[0]=="ROB":
-                    if ROB[rsnum]['Value']==None:
-                        IntAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': '','Val1':None,'Val2':ARFint[rtnum]})
-                    else:
-                        IntAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ROB[rsnum]['Value'],'Val2':ARFint[rtnum]})
-
-                #only target with ROB
-                elif rtName[0]=="ROB":
-
-                    if ROB[rtnum]['Value']==None:
-                        IntAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': rt,'Val1':ARFint[rsnum],'Val2':None})
-                    else:
-                        IntAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ARFint[rsnum],'Val2':ROB[rtnum]['Value']})
-
-                #both sources not in ROB
-                else:
-                    IntAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ARFint[rsnum],'Val2':ARFint[rtnum]})
-                        
+                IntAddRs, RATint = pushtoRS(t, inst, instNum, IntAddRs, RATint, ARFint)
                 #{'Op': '', 'Dst': '', 'Tag1':'','Tag2':'','Val1':None,'Val2':None}
-                ##update RAT and update ROB
-                RATint[inst['Rd']]=renameddest
+                ##update ROB
                 ROB[ROBtail]= {'instNum': instNum,'Type': t, 'Dst': inst['Rd'], 'Value': None, 'Fin': False}
                 ROBtail+=1
 
@@ -250,108 +204,25 @@ def issue(inst,instNum):
         
         ## FP Add    
         elif t in ["add.d","sub.d"] and len(FPAddRs)<config['fpadd'][0]:
-            renameddest = 'ROB'+str(ROBtail)
-            #Read RAT and dispatch in Reservation station
-            rs = RATfloat[inst['Rs']]
-            rt = RATfloat[inst['Rt']]
-            rsName = re.split('(\d+)',RATfloat[inst['Rs']])
-            rtName = re.split('(\d+)',RATfloat[inst['Rt']])
-
-            rsnum = int(rsName[1])
-            rtnum = int(rtName[1])
-                
-            print(rsName)
-            print(rtName)
-
-            ##both dependent on instructions
-            if rsName[0]=="ROB" and rtName[0]=="ROB":
-                    
-                if ROB[rsnum]['Value']==None and ROB[rtnum]['Value']==None:
-                    FPAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': rt,'Val1':None,'Val2':None})
-                elif ROB[rsnum]['Value']!=None and ROB[rtnum]['Value']==None:
-                    FPAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': rt,'Val1':ROB[rsnum]['Value'],'Val2':None})
-                elif ROB[rsnum]['Value']==None and ROB[rtnum]['Value']!=None:
-                    FPAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': rt,'Val1':None,'Val2':ROB[rtnum]['Value']})
-                else:
-                    FPAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ROB[rsnum]['Value'],'Val2':ROB[rtnum]['Value']})
-
-            #Only source with ROB
-            elif rsName[0]=="ROB":
-                if ROB[rsnum]['Value']==None:
-                    FPAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': '','Val1':None,'Val2':ARFfloat[rtnum]})
-                else:
-                    FPAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ROB[rsnum]['Value'],'Val2':ARFfloat[rtnum]})
-
-            #only target with ROB
-            elif rtName[0]=="ROB":
-
-                if ROB[rtnum]['Value']==None:
-                    FPAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': rt,'Val1':ARFfloat[rsnum],'Val2':None})
-                else:
-                    FPAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ARFfloat[rsnum],'Val2':ROB[rtnum]['Value']})
-
-            #both sources not in ROB
-            else:
-                FPAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ARFfloat[rsnum],'Val2':ARFfloat[rtnum]})
-
-
-            RATfloat[inst['Rd']]=renameddest
+            FPAddRs, RATfloat = pushtoRS(t, inst, instNum, FPAddRs, RATfloat, ARFfloat)
+            #{'Op': '', 'Dst': '', 'Tag1':'','Tag2':'','Val1':None,'Val2':None}
+            ##update ROB
             ROB[ROBtail]= {'instNum': instNum,'Type': t, 'Dst': inst['Rd'], 'Value': None, 'Fin': False}
             ROBtail+=1
+            
             return 1
 
         elif t in ['mult.d'] and len(FPMultRs)<config['fpmult'][0]:
-            renameddest = 'ROB'+str(ROBtail)
-            #Read RAT and dispatch in Reservation station
-            rs = RATfloat[inst['Rs']]
-            rt = RATfloat[inst['Rt']]
-            rsName = re.split('(\d+)',RATfloat[inst['Rs']])
-            rtName = re.split('(\d+)',RATfloat[inst['Rt']])
-
-            rsnum = int(rsName[1])
-            rtnum = int(rtName[1])
-                
-            print(rsName)
-            print(rtName)
-
-            ##both dependent on instructions
-            if rsName[0]=="ROB" and rtName[0]=="ROB":
-                    
-                if ROB[rsnum]['Value']==None and ROB[rtnum]['Value']==None:
-                    FPMultRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': rt,'Val1':None,'Val2':None})
-                elif ROB[rsnum]['Value']!=None and ROB[rtnum]['Value']==None:
-                    FPMultRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': rt,'Val1':ROB[rsnum]['Value'],'Val2':None})
-                elif ROB[rsnum]['Value']==None and ROB[rtnum]['Value']!=None:
-                    FPMultRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': rt,'Val1':None,'Val2':ROB[rtnum]['Value']})
-                else:
-                    FPMultRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ROB[rsnum]['Value'],'Val2':ROB[rtnum]['Value']})
-
-            #Only source with ROB
-            elif rsName[0]=="ROB":
-                if ROB[rsnum]['Value']==None:
-                    FPMultRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': '','Val1':None,'Val2':ARFfloat[rtnum]})
-                else:
-                    FPMultRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ROB[rsnum]['Value'],'Val2':ARFfloat[rtnum]})
-
-            #only target with ROB
-            elif rtName[0]=="ROB":
-
-                if ROB[rtnum]['Value']==None:
-                    FPMultRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': rt,'Val1':ARFfloat[rsnum],'Val2':None})
-                else:
-                    FPMultRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ARFfloat[rsnum],'Val2':ROB[rtnum]['Value']})
-
-            #both sources not in ROB
-            else:
-                FPMultRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ARFfloat[rsnum],'Val2':ARFfloat[rtnum]})
-
-            RATfloat[inst['Rd']]=renameddest
+            FPMultRs, RATfloat = pushtoRS(t, inst, instNum, FPMultRs, RATfloat, ARFfloat)
+            #{'Op': '', 'Dst': '', 'Tag1':'','Tag2':'','Val1':None,'Val2':None}
+            ##update ROB
             ROB[ROBtail]= {'instNum': instNum,'Type': t, 'Dst': inst['Rd'], 'Value': None, 'Fin': False}
             ROBtail+=1
+            
             return 1
             
             
-        elif t in ['ld','sd'] and len(LSRes)<config['l/sunit'][0]:
+        elif t in ['ld','sd'] and len(LSRs)<config['l/sunit'][0]:
             ROB[ROBtail]= {'instNum': instNum,'Type': t, 'Dst': '','Value': None, 'Fin': False}
 
     else:
@@ -396,6 +267,56 @@ def pushInstToExec(cc,resStation,funcU,t,i,numcyclesinex):
     for index in rmIndices:
         resStation.pop(index)
     return (resStation,funcU)
+
+def pushtoRS(t, inst, instNum, resStation, RAT, ARF):
+    global ROB
+    renameddest = 'ROB'+str(ROBtail)
+                
+    #Read RAT and dispatch in Reservation station
+    rs = RAT[inst['Rs']]
+    rt = RAT[inst['Rt']]
+    rsName = re.split('(\d+)',RAT[inst['Rs']])
+    rtName = re.split('(\d+)',RAT[inst['Rt']])
+
+    rsnum = int(rsName[1])
+    rtnum = int(rtName[1])
+                
+    #print(rsName)
+    #print(rtName)
+    ##both dependent on instructions
+    if rsName[0]=="ROB" and rtName[0]=="ROB":
+                    
+        if ROB[rsnum]['Value']==None and ROB[rtnum]['Value']==None:
+            resStation.append({'instNum': instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': rt,'Val1':None,'Val2':None})
+        elif ROB[rsnum]['Value']!=None and ROB[rtnum]['Value']==None:
+            resStation.append({'instNum': instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': rt,'Val1':ROB[rsnum]['Value'],'Val2':None})
+        elif ROB[rsnum]['Value']==None and ROB[rtnum]['Value']!=None:
+            resStation.append({'instNum': instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': rt,'Val1':None,'Val2':ROB[rtnum]['Value']})
+        else:
+            resStation.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ROB[rsnum]['Value'],'Val2':ROB[rtnum]['Value']})
+
+    #Only source with ROB
+    elif rsName[0]=="ROB":
+        if ROB[rsnum]['Value']==None:
+            resStation.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': '','Val1':None,'Val2':ARF[rtnum]})
+        else:
+            resStation.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ROB[rsnum]['Value'],'Val2':ARF[rtnum]})
+
+    #only target with ROB
+    elif rtName[0]=="ROB":
+
+        if ROB[rtnum]['Value']==None:
+            resStation.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': rt,'Val1':ARF[rsnum],'Val2':None})
+        else:
+            resStation.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ARF[rsnum],'Val2':ROB[rtnum]['Value']})
+
+    #both sources not in ROB
+    else:
+        resStation.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ARF[rsnum],'Val2':ARF[rtnum]})
+
+    #Update RAT
+    RAT[inst['Rd']]=renameddest                 
+    return (resStation,RAT)
         
 def operation(op,rs,rt):
     if op == 'add' or op=='addi':

@@ -33,7 +33,7 @@ LSFU = [{'instNum': None, 'Dst': '','Value': None,'FinalCycle': None,'Occupied':
 IntAddRs = []
 #FPAddRs = [{'Op': '', 'Dst': '', 'Tag1':'','Tag2':'','Val1':None,'Val2':None} for i in range(config['fpadd'][0])]
 FPAddRs = []
-#FPMultRes = [{'Op': '', 'Dst': '', 'Tag1':'','Tag2':'','Val1':None,'Val2':None} for i in range(config['fpmult'][0])]
+#FPMultRs = [{'Op': '', 'Dst': '', 'Tag1':'','Tag2':'','Val1':None,'Val2':None} for i in range(config['fpmult'][0])]
 FPMultRs = []
 #LSRes = [{'Op': '', 'Dst': '', 'Tag1':'','Tag2':'','Val1':None,'Val2':None} for i in range(config['l/sunit'][0])]
 LSRs = []
@@ -43,11 +43,13 @@ def main():
     instNum = 0 ##instruction number
     cc = 1 ## Clock cycle
     firstInst = instrBuffer[pc]
+    #print(type(firstInst['offset']))
     issued = issue(firstInst,pc)
     timingTable.append({'InstNum':instNum,'Type':firstInst['Type'],'Instruction':firstInst,'iss':cc,'exec':None,'mem':None,'wb':None,'c':None})
     instNum = instNum+1
     pc = pc+1
     nextInst = instrBuffer[pc]
+    
     while timingTable[instNum-1]['c']==None:
     #while nextInst:
         cc += 1
@@ -55,6 +57,7 @@ def main():
         commit(cc)
         writeback(cc)
         execute(cc)
+        print_timingTable()
         if(nextInst!=None):
             issued = issue(nextInst,instNum)
             if issued:
@@ -71,7 +74,7 @@ def main():
 
 
 def commit(cc):
-    global ROBhead, RATint, ARFint
+    global ROBhead, RATint, ARFint, LSRs, Memory
     if ROB[ROBhead]['Fin']:
         t = ROB[ROBhead]['Type']
         Rd = ROB[ROBhead]['Dst']
@@ -100,10 +103,18 @@ def commit(cc):
 
             timingTable[ROB[ROBhead]['instNum']]['c'] = cc
             ROBhead+=1
-##        elif t == "ld":
-##            
-##        elif t == "sd":
-##            Memory[ROB[ROBhead]['Value']] = 
+        ##elif t == "ld":
+            
+        elif t == "sd":
+            ###IMPORTANT: if memory is not occupied
+
+            #if MemOccupied == False:
+            for rsentry in LSRs:
+                if ROB[ROBhead]['instNum']==rsentry['instNum']:
+                    address = rsentry['address']
+                    Memory[address] = rsentry['Val1']
+            timingTable[ROB[ROBhead]['instNum']]['c'] = str(cc) + '-' + str(cc+config['l/sunit'][2])
+            ROBhead+=1
     else:
         return
     
@@ -128,7 +139,7 @@ def writeback(cc):
             entry['Occupied'] = False
             timingTable[entry['instNum']]['wb'] = cc
             CDBoccupied = True
-    for FU in [IntAddFU,IntAddFU,FPAddFU,FPMultFU,LSFU]:
+    for FU in [IntAddFU,IntAddFU,FPAddFU,FPMultFU]:
         for entry in FU:
             if entry['FinalCycle'] is not None and entry['FinalCycle']+1 == cc:
                 #print('Exec Done!')
@@ -153,9 +164,28 @@ def writeback(cc):
                         if not CDBentry['Occupied']:
                             CDBentry=entry
                             entry['Occupied'] = False
+
+    ##for load/store
+    for entry in LSFU:
+        
+        if entry['FinalCycle'] is not None and entry['FinalCycle']+1 == cc:
+            if not CDBoccupied:
+                #write address back to RS
+
+                for ROBi, ROBentry in enumerate(ROB):
+                    if ROBentry['instNum']==entry['instNum']:
+                            ROBentry['Fin']= True
+                for RSentry in LSRs:
+                    if RSentry['instNum']==entry['instNum']:
+                        RSentry['address']=entry['address']
+                entry['Occupied'] = False
+                timingTable[entry['instNum']]['wb'] = cc
+                CDBoccupied = True
+    
                             
 
 def memory():
+    ##only for load instruction
     pass
 
     
@@ -177,68 +207,23 @@ def execute(cc):
                 elif t in ["add.d","sub.d"]:
                     FPAddRs, FPAddFU = pushInstToExec(cc,FPAddRs,FPAddFU,t,i,config['fpadd'][1])
                 elif t in ["mult.d"]:
-                    FPMultRs, FPMultFU = pushInstToExec(cc,FPAddRs,FPAddFU,t,i,config['fpmult'][1])
+                    FPMultRs, FPMultFU = pushInstToExec(cc,FPMultRs,FPMultFU,t,i,config['fpmult'][1])
                 elif t in ["ld","sd"]:
                     LSRs, LSFU = pushInstToExec(cc,LSRs,LSFU,t,i,config['l/sunit'][1])
             
 
+
 def issue(inst,instNum):
-    global ROB, ROBtail, RATint, RATfloat, ARFint, ARFfloat
+    global ROB, ROBtail, RATint, RATfloat, ARFint, ARFfloat, IntAddRs, FPAddRs, FPMultRs, LSRs
     if ROBtail-ROBhead<int(config['ROBentries']):
         t = (inst['Type'])
+
         if t in ["add","addi","sub","beq", "bne"] and len(IntAddRs)<config['intadd'][0]:
 
             if t in ["add","addi","sub"]:
-                
-                renameddest = 'ROB'+str(ROBtail)
-                
-                #Read RAT and dispatch in Reservation station
-                rs = RATint[inst['Rs']]
-                rt = RATint[inst['Rt']]
-                rsName = re.split('(\d+)',RATint[inst['Rs']])
-                rtName = re.split('(\d+)',RATint[inst['Rt']])
-
-                rsnum = int(rsName[1])
-                rtnum = int(rtName[1])
-                
-                #print(rsName)
-                #print(rtName)
-                
-
-                ##both dependent on instructions
-                if rsName[0]=="ROB" and rtName[0]=="ROB":
-                    
-                    if ROB[rsnum]['Value']==None and ROB[rtnum]['Value']==None:
-                        IntAddRs.append({'instNum': instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': rt,'Val1':None,'Val2':None})
-                    elif ROB[rsnum]['Value']!=None and ROB[rtnum]['Value']==None:
-                        IntAddRs.append({'instNum': instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': rt,'Val1':ROB[rsnum]['Value'],'Val2':None})
-                    elif ROB[rsnum]['Value']==None and ROB[rtnum]['Value']!=None:
-                        IntAddRs.append({'instNum': instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': rt,'Val1':None,'Val2':ROB[rtnum]['Value']})
-                    else:
-                        IntAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ROB[rsnum]['Value'],'Val2':ROB[rtnum]['Value']})
-
-                #Only source with ROB
-                elif rsName[0]=="ROB":
-                    if ROB[rsnum]['Value']==None:
-                        IntAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': '','Val1':None,'Val2':ARFint[rtnum]})
-                    else:
-                        IntAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ROB[rsnum]['Value'],'Val2':ARFint[rtnum]})
-
-                #only target with ROB
-                elif rtName[0]=="ROB":
-
-                    if ROB[rtnum]['Value']==None:
-                        IntAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': rt,'Val1':ARFint[rsnum],'Val2':None})
-                    else:
-                        IntAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ARFint[rsnum],'Val2':ROB[rtnum]['Value']})
-
-                #both sources not in ROB
-                else:
-                    IntAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ARFint[rsnum],'Val2':ARFint[rtnum]})
-                        
+                IntAddRs, RATint = pushtoRS(t, inst, instNum, IntAddRs, RATint, ARFint)
                 #{'Op': '', 'Dst': '', 'Tag1':'','Tag2':'','Val1':None,'Val2':None}
-                ##update RAT and update ROB
-                RATint[inst['Rd']]=renameddest
+                ##update ROB
                 ROB[ROBtail]= {'instNum': instNum,'Type': t, 'Dst': inst['Rd'], 'Value': None, 'Fin': False}
                 ROBtail+=1
 
@@ -250,112 +235,96 @@ def issue(inst,instNum):
         
         ## FP Add    
         elif t in ["add.d","sub.d"] and len(FPAddRs)<config['fpadd'][0]:
-            renameddest = 'ROB'+str(ROBtail)
-            #Read RAT and dispatch in Reservation station
-            rs = RATfloat[inst['Rs']]
-            rt = RATfloat[inst['Rt']]
-            rsName = re.split('(\d+)',RATfloat[inst['Rs']])
-            rtName = re.split('(\d+)',RATfloat[inst['Rt']])
-
-            rsnum = int(rsName[1])
-            rtnum = int(rtName[1])
-                
-            print(rsName)
-            print(rtName)
-
-            ##both dependent on instructions
-            if rsName[0]=="ROB" and rtName[0]=="ROB":
-                    
-                if ROB[rsnum]['Value']==None and ROB[rtnum]['Value']==None:
-                    FPAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': rt,'Val1':None,'Val2':None})
-                elif ROB[rsnum]['Value']!=None and ROB[rtnum]['Value']==None:
-                    FPAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': rt,'Val1':ROB[rsnum]['Value'],'Val2':None})
-                elif ROB[rsnum]['Value']==None and ROB[rtnum]['Value']!=None:
-                    FPAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': rt,'Val1':None,'Val2':ROB[rtnum]['Value']})
-                else:
-                    FPAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ROB[rsnum]['Value'],'Val2':ROB[rtnum]['Value']})
-
-            #Only source with ROB
-            elif rsName[0]=="ROB":
-                if ROB[rsnum]['Value']==None:
-                    FPAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': '','Val1':None,'Val2':ARFfloat[rtnum]})
-                else:
-                    FPAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ROB[rsnum]['Value'],'Val2':ARFfloat[rtnum]})
-
-            #only target with ROB
-            elif rtName[0]=="ROB":
-
-                if ROB[rtnum]['Value']==None:
-                    FPAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': rt,'Val1':ARFfloat[rsnum],'Val2':None})
-                else:
-                    FPAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ARFfloat[rsnum],'Val2':ROB[rtnum]['Value']})
-
-            #both sources not in ROB
-            else:
-                FPAddRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ARFfloat[rsnum],'Val2':ARFfloat[rtnum]})
-
-
-            RATfloat[inst['Rd']]=renameddest
+            FPAddRs, RATfloat = pushtoRS(t, inst, instNum, FPAddRs, RATfloat, ARFfloat)
+            #{'Op': '', 'Dst': '', 'Tag1':'','Tag2':'','Val1':None,'Val2':None}
+            ##update ROB
             ROB[ROBtail]= {'instNum': instNum,'Type': t, 'Dst': inst['Rd'], 'Value': None, 'Fin': False}
             ROBtail+=1
+            
             return 1
 
         elif t in ['mult.d'] and len(FPMultRs)<config['fpmult'][0]:
-            renameddest = 'ROB'+str(ROBtail)
-            #Read RAT and dispatch in Reservation station
-            rs = RATfloat[inst['Rs']]
-            rt = RATfloat[inst['Rt']]
-            rsName = re.split('(\d+)',RATfloat[inst['Rs']])
-            rtName = re.split('(\d+)',RATfloat[inst['Rt']])
-
-            rsnum = int(rsName[1])
-            rtnum = int(rtName[1])
-                
-            print(rsName)
-            print(rtName)
-
-            ##both dependent on instructions
-            if rsName[0]=="ROB" and rtName[0]=="ROB":
-                    
-                if ROB[rsnum]['Value']==None and ROB[rtnum]['Value']==None:
-                    FPMultRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': rt,'Val1':None,'Val2':None})
-                elif ROB[rsnum]['Value']!=None and ROB[rtnum]['Value']==None:
-                    FPMultRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': rt,'Val1':ROB[rsnum]['Value'],'Val2':None})
-                elif ROB[rsnum]['Value']==None and ROB[rtnum]['Value']!=None:
-                    FPMultRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': rt,'Val1':None,'Val2':ROB[rtnum]['Value']})
-                else:
-                    FPMultRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ROB[rsnum]['Value'],'Val2':ROB[rtnum]['Value']})
-
-            #Only source with ROB
-            elif rsName[0]=="ROB":
-                if ROB[rsnum]['Value']==None:
-                    FPMultRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': '','Val1':None,'Val2':ARFfloat[rtnum]})
-                else:
-                    FPMultRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ROB[rsnum]['Value'],'Val2':ARFfloat[rtnum]})
-
-            #only target with ROB
-            elif rtName[0]=="ROB":
-
-                if ROB[rtnum]['Value']==None:
-                    FPMultRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': rt,'Val1':ARFfloat[rsnum],'Val2':None})
-                else:
-                    FPMultRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ARFfloat[rsnum],'Val2':ROB[rtnum]['Value']})
-
-            #both sources not in ROB
-            else:
-                FPMultRs.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ARFfloat[rsnum],'Val2':ARFfloat[rtnum]})
-
-            RATfloat[inst['Rd']]=renameddest
+            FPMultRs, RATfloat = pushtoRS(t, inst, instNum, FPMultRs, RATfloat, ARFfloat)
+            #{'Op': '', 'Dst': '', 'Tag1':'','Tag2':'','Val1':None,'Val2':None}
+            ##update ROB
             ROB[ROBtail]= {'instNum': instNum,'Type': t, 'Dst': inst['Rd'], 'Value': None, 'Fin': False}
             ROBtail+=1
+            
             return 1
             
             
-        elif t in ['ld','sd'] and len(LSRes)<config['l/sunit'][0]:
-            ROB[ROBtail]= {'instNum': instNum,'Type': t, 'Dst': '','Value': None, 'Fin': False}
+        elif t in ['ld','sd'] and len(LSRs)<config['l/sunit'][0]:
+            Ra = RATint[inst['Ra']]
+            raName = re.split('(\d+)',Ra)
+            ranum = int(raName[1])
+            offset = int(inst['offset'])
+
+            
+            if t == 'ld':
+                renameddest = 'ROB'+str(ROBtail)
+                
+                if raName[0]=='ROB':
+                    if ROB[ranum]['Value']==None:
+                        LSRs.append({'instNum': instNum,'Op': t, 'Dst':renameddest,'Tag1': '','Tag2': Ra,'Val1':None,'Val2':None,'offset':offset,'address':None})
+                    else:
+                        LSRs.append({'instNum': instNum,'Op': t,'Dst':renameddest,'Tag1': '','Tag2': '','Val1':None,'Val2':ROB[ranum]['Value'],'offset':offset,'address':None})
+                else:
+                    LSRs.append({'instNum': instNum,'Op': t,'Dst':renameddest,'Tag1': '','Tag2': '','Val1':None,'Val2':ARFint[ranum],'offset':offset,'address':None})
+
+                ##rename destination
+                RATfloat[inst['Fa']]=renameddest
+                ROB[ROBtail]= {'instNum': instNum,'Type': t, 'Dst': inst['Fa'],'Value': None, 'Fin': False}
+
+                print_RS()
+                
+
+            elif t == 'sd':
+                Fa = RATfloat[inst['Fa']]
+                faName = re.split('(\d+)',Fa)
+                fanum = int(faName[1])
+                if faName[0]=="ROB" and raName[0]=="ROB":
+                    
+                    if ROB[fanum]['Value']==None and ROB[ranum]['Value']==None:
+                        LSRs.append({'instNum': instNum,'Op': t, 'Dst': None, 'Tag1': Fa,'Tag2': Ra,'Val1':None,'Val2':None,'offset':offset,'address':None})
+                    elif ROB[fanum]['Value']!=None and ROB[ranum]['Value']==None:
+                        LSRs.append({'instNum': instNum,'Op': t, 'Dst':None, 'Tag1': '','Tag2': Ra,'Val1':ROB[fanum]['Value'],'Val2':None,'offset':offset,'address':None})
+                    elif ROB[fanum]['Value']==None and ROB[ranum]['Value']!=None:
+                        LSRs.append({'instNum': instNum,'Op': t, 'Dst':None, 'Tag1': Fa,'Tag2': '','Val1':None,'Val2':ROB[ranum]['Value'],'offset':offset,'address':None})
+                    else:
+                        LSRs.append({'instNum':instNum,'Op': t, 'Dst':None, 'Tag1': '','Tag2': '','Val1':ROB[fanum]['Value'],'Val2':ROB[ranum]['Value'],'offset':offset,'address':None})
+
+                #Only source with ROB
+                elif faName[0]=="ROB":
+                    if ROB[rsnum]['Value']==None:
+                        LSRs.append({'instNum':instNum,'Op': t, 'Dst':None, 'Tag1': Fa,'Tag2': '','Val1':None,'Val2':ARFint[ranum],'offset':offset,'address':None})
+                    else:
+                        LSRs.append({'instNum':instNum,'Op': t, 'Dst':None, 'Tag1': '','Tag2': '','Val1':ROB[fanum]['Value'],'Val2':ARFint[ranum],'offset':offset,'address':None})
+                
+                elif raName[0]=="ROB":
+
+                    if ROB[rtnum]['Value']==None:
+                        LSRs.append({'instNum':instNum,'Op': t, 'Dst':None, 'Tag1': '','Tag2': Ra,'Val1':ARFfloat[fanum],'Val2':None,'offset':offset,'address':None})
+                    else:
+                        LSRs.append({'instNum':instNum,'Op': t, 'Dst':None, 'Tag1': '','Tag2': '','Val1':ARFfloat[fanum],'Val2':ROB[ranum]['Value'],'offset':offset,'address':None})
+                #both sources not in ROB
+                else:
+                    LSRs.append({'instNum':instNum,'Op': t, 'Dst': None, 'Tag1': '','Tag2': '','Val1':ARFfloat[fanum],'Val2':ARFint[ranum],'offset':offset,'address':None})
+
+                #add sd to ROB
+                ROB[ROBtail]= {'instNum': instNum,'Type': t, 'Dst': None,'Value': None, 'Fin': False}
+
+            return 1
+
 
     else:
         return 0
+
+
+
+###########################################################################################################################################
+
+
+
 
 
 def pushInstToExec(cc,resStation,funcU,t,i,numcyclesinex):
@@ -363,39 +332,112 @@ def pushInstToExec(cc,resStation,funcU,t,i,numcyclesinex):
     rmIndices = []
     for j,rs in enumerate(resStation):
         if rs['instNum']==i:
-        ##if values are ready
-            if rs['Val1'] is not None and rs['Val2'] is not None and rs['Tag1']=='' and rs['Tag2']=='':
-            ##loop through FUs to see if they are occupied
-                for fu in funcU:
-                    if not fu['Occupied']:
-                        if t in ["ld"]:
-                            fu['Address'] = operation(t,rs['Val1'],rs['Val2'])
+            ##ld is the only instruction with only one source.  Thus, only check tag2
+            if t == 'ld':
+                if rs['Val2'] is not None and rs['Tag2']=='':
+                ##loop through FUs to see if they are occupied
+                    for fu in funcU:
+                        if not fu['Occupied']:
+                            fu['Type']=t
+                            fu['address'] = operation(t,rs['Val2'],rs['offset'])
                             fu['Dst'] = rs['Dst']
                             fu['instNum'] = rs['instNum']
                             fu['Occupied'] = True
                             fu['FinalCycle'] = cc + numcyclesinex - 1
-                            rmIndices.append(j)
+                                #rmIndices.append(j)
                             timingTable[i]['exec']=str(cc) + '-' + str(fu['FinalCycle'])
                             break
-                        else:
-                            fu['Value'] = operation(t,rs['Val1'],rs['Val2'])
-                            fu['Dst'] = rs['Dst']
-                            fu['instNum'] = rs['instNum']
-                            fu['Occupied'] = True
-                            fu['FinalCycle'] = cc + numcyclesinex - 1
-                            rmIndices.append(j)
-                            timingTable[i]['exec']=str(cc) + '-' + str(fu['FinalCycle'])
-                            break
-            ##dependent instructions: wait one cycle since values were just written back
-            elif rs['Val1'] is not None and rs['Val2'] is not None and (rs['Tag1'] == 'replaced' or rs['Tag2'] =='replaced'):
-                rs['Tag1']=''
-                rs['Tag2']=''
-                break
+                elif rs['Val2'] is not None and rs['Tag2'] =='replaced':
+                    rs['Tag2']=''
+                    break
+
+            ## all other instructions have two sources
+            else:
+                ##if values are ready
+                if rs['Val1'] is not None and rs['Val2'] is not None and rs['Tag1']=='' and rs['Tag2']=='':
+                ##loop through FUs to see if they are occupied
+                    for fu in funcU:
+                        if not fu['Occupied']:
+                            if t == "sd":
+                                fu['Type']=t
+                                fu['address'] = operation(t,rs['Val2'],rs['offset'])
+                                fu['Dst'] = rs['Dst']
+                                fu['instNum'] = rs['instNum']
+                                fu['Occupied'] = True
+                                fu['FinalCycle'] = cc + numcyclesinex - 1
+                                #rmIndices.append(j)
+                                timingTable[i]['exec']=str(cc) + '-' + str(fu['FinalCycle'])
+                                break
+                            else:
+                                fu['Type']=t
+                                fu['Value'] = operation(t,rs['Val1'],rs['Val2'])
+                                fu['Dst'] = rs['Dst']
+                                fu['instNum'] = rs['instNum']
+                                fu['Occupied'] = True
+                                fu['FinalCycle'] = cc + numcyclesinex - 1
+                                rmIndices.append(j)
+                                timingTable[i]['exec']=str(cc) + '-' + str(fu['FinalCycle'])
+                                break
+                ##dependent instructions: wait one cycle since values were just written back
+                elif rs['Val1'] is not None and rs['Val2'] is not None and (rs['Tag1'] == 'replaced' or rs['Tag2'] =='replaced'):
+                    rs['Tag1']=''
+                    rs['Tag2']=''
+                    break
                 
 
     for index in rmIndices:
         resStation.pop(index)
     return (resStation,funcU)
+
+def pushtoRS(t, inst, instNum, resStation, RAT, ARF):
+    global ROB
+    renameddest = 'ROB'+str(ROBtail)
+                
+    #Read RAT and dispatch in Reservation station
+    rs = RAT[inst['Rs']]
+    rt = RAT[inst['Rt']]
+    rsName = re.split('(\d+)',RAT[inst['Rs']])
+    rtName = re.split('(\d+)',RAT[inst['Rt']])
+
+    rsnum = int(rsName[1])
+    rtnum = int(rtName[1])
+                
+    #print(rsName)
+    #print(rtName)
+    ##both dependent on instructions
+    if rsName[0]=="ROB" and rtName[0]=="ROB":
+                    
+        if ROB[rsnum]['Value']==None and ROB[rtnum]['Value']==None:
+            resStation.append({'instNum': instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': rt,'Val1':None,'Val2':None})
+        elif ROB[rsnum]['Value']!=None and ROB[rtnum]['Value']==None:
+            resStation.append({'instNum': instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': rt,'Val1':ROB[rsnum]['Value'],'Val2':None})
+        elif ROB[rsnum]['Value']==None and ROB[rtnum]['Value']!=None:
+            resStation.append({'instNum': instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': '','Val1':None,'Val2':ROB[rtnum]['Value']})
+        else:
+            resStation.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ROB[rsnum]['Value'],'Val2':ROB[rtnum]['Value']})
+
+    #Only source with ROB
+    elif rsName[0]=="ROB":
+        if ROB[rsnum]['Value']==None:
+            resStation.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': '','Val1':None,'Val2':ARF[rtnum]})
+        else:
+            resStation.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ROB[rsnum]['Value'],'Val2':ARF[rtnum]})
+
+    #only target with ROB
+    elif rtName[0]=="ROB":
+
+        if ROB[rtnum]['Value']==None:
+            resStation.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': rt,'Val1':ARF[rsnum],'Val2':None})
+        else:
+            resStation.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ARF[rsnum],'Val2':ROB[rtnum]['Value']})
+
+    #both sources not in ROB
+    else:
+        resStation.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ARF[rsnum],'Val2':ARF[rtnum]})
+
+    #Update RAT
+    RAT[inst['Rd']]=renameddest                 
+    return (resStation,RAT)
         
 def operation(op,rs,rt):
     if op == 'add' or op=='addi':
@@ -456,9 +498,14 @@ def print_RS():
     #{'instNum': instNum,'Op': t, 'Dst': inst['Rd'], 'Tag1': rs,'Tag2': rt,'Val1':None,'Val2':ROB[rtnum]['Value']}
     for i, rs in enumerate([IntAddRs,FPAddRs,FPMultRs,LSRs]):
         print(resStationNames[i])
-        print('%-4s %-4s %-4s %-4s %-4s %-4s' %('Op','Dst','Tag1','Tag2','Val1','Val2'))
-        for rsentry in rs:
-            print('%-4s %-4s %-4s %-4s %-4s %-15s' %(rsentry['Op'],rsentry['Dst'],rsentry['Tag1'], rsentry['Tag2'], rsentry['Val1'], rsentry['Val2']))
+        if rs != LSRs:
+            print('%-4s %-4s %-4s %-4s %-4s %-4s' %('Op','Dst','Tag1','Tag2','Val1','Val2'))
+            for rsentry in rs:
+                print('%-4s %-4s %-4s %-4s %-4s %-15s' %(rsentry['Op'],rsentry['Dst'],rsentry['Tag1'], rsentry['Tag2'], rsentry['Val1'], rsentry['Val2']))
+        else:
+            print('%-4s %-4s %-4s %-4s %-4s %-4s %-4s %-4s' %('Op','Dst','Tag1','Tag2','Val1','Val2','offset','address'))
+            for rsentry in rs:
+                print('%-4s %-4s %-4s %-4s %-4s %-4s %-4s %-4s' %(rsentry['Op'],rsentry['Dst'],rsentry['Tag1'], rsentry['Tag2'], rsentry['Val1'], rsentry['Val2'],rsentry['offset'],rsentry['address']))
         print()
 
 def print_timingTable():
@@ -476,8 +523,6 @@ def print_timingTable():
             instructionname  = entry['Instruction']['Type']+' '+entry['Instruction']['Rd']+' '+entry['Instruction']['Rs']+' '+entry['Instruction']['Rt']
             
         print('%-4s %-20s %-4s %-8s %-6s %-4s %-4s' %(entry['InstNum'],instructionname,entry['iss'],entry['exec'],entry['mem'],entry['wb'],entry['c']))
-    
-
 
           
 def print_mem():

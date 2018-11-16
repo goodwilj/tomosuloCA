@@ -37,8 +37,14 @@ FPAddRs = []
 FPMultRs = []
 #LSRes = [{'Op': '', 'Dst': '', 'Tag1':'','Tag2':'','Val1':None,'Val2':None} for i in range(config['l/sunit'][0])]
 LSRs = []
+
+##BTB
+BTB = [{'PCAddress':None,'pred': True} for i in range(8)]
+
 MemOccupied=False
 MemFinalCycle=0
+
+
 
 pc = 0 ## Program counter
 
@@ -47,7 +53,6 @@ def main():
     instNum = 0 ##instruction number
     cc = 1 ## Clock cycle
     firstInst = instrBuffer[pc]
-    #print(type(firstInst['offset']))
     issued = issue(firstInst,pc)
     timingTable.append({'InstNum':instNum,'Type':firstInst['Type'],'Instruction':firstInst,'iss':cc,'exec':None,'mem':None,'wb':None,'c':None})
     instNum = instNum+1
@@ -63,17 +68,15 @@ def main():
         commit(cc)
         writeback(cc)
         memory(cc)
-        branchtaken = execute(cc)
+        execute(cc)
         print(pc)
-        if branchtaken:
-            nextInst = instrBuffer[pc]
+        nextInst = instrBuffer[pc]
         ##print_timingTable()
         if(nextInst!=None):
             issued = issue(nextInst,instNum)
             if issued:
                 timingTable.append({'InstNum':instNum,'Type':nextInst['Type'],'Instruction':nextInst,'iss':cc,'exec':None,'mem':None,'wb':None,'c':None})
                 instNum = instNum+1
-
                 ##may not need
 ##                if instrBuffer[pc+1] is not None:
 ##                    pc = pc+1
@@ -266,7 +269,7 @@ def execute(cc):
     global IntAddFU, FPAddFU, FPMultFU, LSFU
     
     if timingTable is None:
-        return False
+        return
     else:
         for i, entry in enumerate(timingTable):
             if entry['exec'] is None and entry['iss'] is not None:
@@ -281,15 +284,21 @@ def execute(cc):
                     LSRs, LSFU = pushInstToExec(cc,LSRs,LSFU,t,i,config['l/sunit'][1])
 
 
-        ##branches augment if the program counter if they are true
+        ##decide whether there was a misprediction
         for entry in IntAddFU:
             if entry['FinalCycle'] is not None and entry['FinalCycle']+1 == cc and entry['Type'] in ['beq','bne']:
-                if entry['Value']:
-                    pc = (pc+entry['offset'])
+                if entry['Value'] and not entry['pred']:
+                    ## Should have taken, but didn't
+                    pc = entry['branchaddress'] + entry['offset']
+                    BTBindex = pc & 0b111
+                    print(BTB[BTBindex]['pred'])
+                    BTB[BTBindex]['pred'] = not BTB[BTBindex]['pred']
                     print('here')
-                    return True
-
-        return False
+                elif not entry['Value'] and entry['pred']:
+                    ## Should not have taken, but did
+                    pc = entry['branchaddress']
+                    BTBindex = pc & 0b111
+                    BTB[BTBindex]['pred'] = not BTB[BTBindex]['pred']
 
 
 def issue(inst,instNum):
@@ -308,8 +317,9 @@ def issue(inst,instNum):
 
             ##branch instruction
             else:
-                prediction()
-                IntAddRs, RATint = pushtoRS(t, inst, instNum, IntAddRs, RATint, ARFint)
+                offset = int(inst['offset'])
+                pred,branchaddress = prediction(offset)
+                IntAddRs, RATint = pushtoRS(t, inst, instNum, IntAddRs, RATint, ARFint,branchaddress,pred)
                 ROB[ROBtail]= {'instNum': instNum,'Type': t, 'Dst': '', 'Value': None, 'Fin': False}
                 ROBtail+=1
                 
@@ -407,10 +417,16 @@ def issue(inst,instNum):
 ###########################################################################################################################################
 
 
-
-
-def prediction():
-    global pc, RATint, RATfloat
+""" Branch Prediction """
+def prediction(offset):
+    global pc
+    indexBTB = pc & 0b111
+    pred = BTB[indexBTB]['pred']
+    BTB[indexBTB]['PCAddress'] = pc
+    origPC = pc
+    if pred:
+        pc = pc+offset
+    return (pred,origPC)
 
 
 def pushInstToExec(cc,resStation,funcU,t,i,numcyclesinex):
@@ -470,6 +486,8 @@ def pushInstToExec(cc,resStation,funcU,t,i,numcyclesinex):
                                 fu['Occupied'] = True
                                 fu['FinalCycle'] = cc + numcyclesinex - 1
                                 fu['offset']=rs['offset']
+                                fu['branchaddress']=rs['branchaddress']
+                                fu['pred']=rs['pred']
                                 rmIndices.append(j)
                                 timingTable[i]['exec']=str(cc) + '-' + str(fu['FinalCycle'])
                                     
@@ -485,9 +503,9 @@ def pushInstToExec(cc,resStation,funcU,t,i,numcyclesinex):
         resStation.pop(index)
     return (resStation,funcU)
 
-def pushtoRS(t, inst, instNum, resStation, RAT, ARF):
+def pushtoRS(t, inst, instNum, resStation, RAT, ARF, branchaddress=None, pred=None):
     global ROB
-
+    
     ##for branch instructions, there is no destination
     if t in ['beq','bne']:
         renameddest=None
@@ -512,32 +530,32 @@ def pushtoRS(t, inst, instNum, resStation, RAT, ARF):
     if rsName[0]=="ROB" and rtName[0]=="ROB":
                     
         if ROB[rsnum]['Value']==None and ROB[rtnum]['Value']==None:
-            resStation.append({'instNum': instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': rt,'Val1':None,'Val2':None,'offset':offset})
+            resStation.append({'instNum': instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': rt,'Val1':None,'Val2':None,'offset':offset,'branchaddress':branchaddress, 'pred': pred})
         elif ROB[rsnum]['Value']!=None and ROB[rtnum]['Value']==None:
-            resStation.append({'instNum': instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': rt,'Val1':ROB[rsnum]['Value'],'Val2':None,'offset':offset})
+            resStation.append({'instNum': instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': rt,'Val1':ROB[rsnum]['Value'],'Val2':None,'offset':offset,'branchaddress':branchaddress, 'pred': pred})
         elif ROB[rsnum]['Value']==None and ROB[rtnum]['Value']!=None:
-            resStation.append({'instNum': instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': '','Val1':None,'Val2':ROB[rtnum]['Value'],'offset':offset})
+            resStation.append({'instNum': instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': '','Val1':None,'Val2':ROB[rtnum]['Value'],'offset':offset,'branchaddress':branchaddress, 'pred': pred})
         else:
-            resStation.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ROB[rsnum]['Value'],'Val2':ROB[rtnum]['Value'],'offset':offset})
+            resStation.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ROB[rsnum]['Value'],'Val2':ROB[rtnum]['Value'],'offset':offset,'branchaddress':branchaddress, 'pred': pred})
 
     #Only source with ROB
     elif rsName[0]=="ROB":
         if ROB[rsnum]['Value']==None:
-            resStation.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': '','Val1':None,'Val2':ARF[rtnum],'offset':offset})
+            resStation.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': rs,'Tag2': '','Val1':None,'Val2':ARF[rtnum],'offset':offset,'branchaddress':branchaddress, 'pred': pred})
         else:
-            resStation.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ROB[rsnum]['Value'],'Val2':ARF[rtnum],'offset':offset})
+            resStation.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ROB[rsnum]['Value'],'Val2':ARF[rtnum],'offset':offset,'branchaddress':branchaddress, 'pred': pred})
 
     #only target with ROB
     elif rtName[0]=="ROB":
 
         if ROB[rtnum]['Value']==None:
-            resStation.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': rt,'Val1':ARF[rsnum],'Val2':None,'offset':offset})
+            resStation.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': rt,'Val1':ARF[rsnum],'Val2':None,'offset':offset,'branchaddress':branchaddress, 'pred': pred})
         else:
-            resStation.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ARF[rsnum],'Val2':ROB[rtnum]['Value'],'offset':offset})
+            resStation.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ARF[rsnum],'Val2':ROB[rtnum]['Value'],'offset':offset,'branchaddress':branchaddress, 'pred': pred})
 
     #both sources not in ROB
     else:
-        resStation.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ARF[rsnum],'Val2':ARF[rtnum],'offset':offset})
+        resStation.append({'instNum':instNum,'Op': t, 'Dst': renameddest, 'Tag1': '','Tag2': '','Val1':ARF[rsnum],'Val2':ARF[rtnum],'offset':offset,'branchaddress':branchaddress, 'pred': pred})
 
     #Update RAT
     if t not in ['beq','bne']:

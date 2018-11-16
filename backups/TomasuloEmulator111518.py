@@ -275,8 +275,6 @@ def execute(cc):
                 elif t in ["ld","sd"]:
                     LSRs, LSFU = pushInstToExec(cc,LSRs,LSFU,t,i,config['l/sunit'][1])
 
-
-        ##branches augment if the program counter if they are true
         for entry in IntAddFU:
             if entry['FinalCycle'] is not None and entry['FinalCycle']+1 == cc and entry['Type'] in ['beq','bne']:
                 if entry['Value']:

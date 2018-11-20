@@ -78,8 +78,7 @@ def instParser(instructions):
     instrList = []
     ### Loop through Instructions ###
     for i in range(len(instructions)):
-        inst = re.split(", |,| ",instructions[i])
-        print(inst)
+        inst = instructions[i].split()
         ### Don't want empty lines ###
         if not inst:
             continue
@@ -100,28 +99,28 @@ def instParser(instructions):
         ## ld: load a single precision floating point value to Fa
         ## sd: Store a single precision floating point value to memory
         if cmd in ["ld","sd"]:
-            Fa = data[0].replace(",","").upper()
+            Fa = data[0].replace(",","")
             ### Need to parse the offset properly and remove ending )
-            loc = data[1].replace(")","").split("(").upper()
-            offset = loc[0].replace(",","")
-            reg = loc[1].replace(",","").upper()
+            loc = data[1].replace(")","").split("(")
+            offset = loc[0].replace(","," ").split()[0]
+            reg = loc[1].replace(","," ").split()[0].upper()
             instrList.append({'Type': cmd,'Fa':Fa,'offset':offset,'Ra':reg})
             print(cmd,Fa,offset,reg)
         
         ## beq: if Rs==Rt, branch to PC+4+offset << 2
         ## bne: if Rs!=Rt, branch to PC+4+offset << 2
         elif cmd in ["beq","bne"]:
-            Rs = data[0].replace(",","").upper()
-            Rt = data[1].replace(",","").upper()
-            offset = data[2].replace(",","")
+            Rs = data[0].replace(","," ").split()[0].upper()
+            Rt = data[1].replace(","," ").split()[0].upper()
+            offset = data[2].replace(","," ").split()[0]
             instrList.append({'Type': cmd,'Rs':Rs,'offset':offset,'Rt':Rt})
             print(cmd,Rs,Rt,offset)
 
         ##d = s <operation> t
         else:
-            d = data[0].replace(",","").upper()
-            s = data[1].replace(",","").upper()
-            t = data[2].replace(",","").upper()
+            d = data[0].replace(","," ").split()[0].upper()
+            s = data[1].replace(","," ").split()[0].upper()
+            t = data[2].replace(","," ").split()[0].upper()
             instrList.append({'Type': cmd,'Rd':d,'Rs':s,'Rt':t})
             print(cmd,d,s,t)
 

@@ -18,7 +18,7 @@ ROB = [{'instNum': None, 'Type': '', 'Dst': '', 'Value': None, 'Fin': False} for
 ROBhead = 0
 ROBtail = 0
 #Init CDB
-CDBbuffer = [{'instNum': None, 'Dst': '','Value': None,'FinalCycle': None,'Occupied': False} for i in range(int(config['CDBBuffEntries']))]
+CDBbuffer = [{'instNum': None, 'Dst': '','Value': None,'Occupied': False} for i in range(int(config['CDBBuffEntries']))]
 #Init RAT and number of functional units (config[..][3] indicates input FU #)
 RATint = {'R'+str(i) : 'R'+str(i)  for i in range(32)}
 RATfloat = {'F'+str(i) : 'F'+str(i)  for i in range(32)}
@@ -49,24 +49,27 @@ RATcopies = []
 
 MemOccupied=False
 MemFinalCycle=0
-
+CDBoccupied=False
+numROBentries = 0
+lastValid = 0
 
 
 pc = 0 ## Program counter
 
 def main():
-    global pc
+    global pc,lastValid
     instNum = 0 ##instruction number
     cc = 1 ## Clock cycle
     firstInst = instrBuffer[pc]
     issued = issue(firstInst,pc)
     timingTable.append({'InstNum':instNum,'Type':firstInst['Type'],'Instruction':firstInst,'iss':cc,'exec':None,'mem':None,'wb':None,'c':None})
     instNum = instNum+1
+    lastValid = instNum
     pc = pc+1
     nextInst = instrBuffer[pc]
     mispredissuecounter=None
 
-    while timingTable[instNum-1]['c']==None:
+    while timingTable[lastValid-1]['c']==None:
     #while nextInst:
         cc += 1
         if cc == MemFinalCycle:
@@ -75,7 +78,7 @@ def main():
         commit(cc)
         writeback(cc)
         memory(cc)
-        misprediction = execute(cc)
+        misprediction,lastValid = execute(cc)
         if misprediction:
             mispredissuecounter=0
         #print(misprediction)
@@ -89,6 +92,7 @@ def main():
                 if issued:
                     timingTable.append({'InstNum':instNum,'Type':nextInst['Type'],'Instruction':nextInst,'iss':cc,'exec':None,'mem':None,'wb':None,'c':None})
                     instNum = instNum+1
+                    lastValid = instNum
                     pc = pc+1
                     nextInst = instrBuffer[pc]
                     mispredissuecounter=None
@@ -103,7 +107,7 @@ def main():
 
 
 def commit(cc):
-    global ROBhead, RATint, ARFint
+    global ROBhead, RATint, ARFint, numROBentries
     global LSRs, Memory, MemOccupied, MemFinalCycle
     global FPAddFU
     
@@ -147,7 +151,7 @@ def commit(cc):
                 ROBhead = 0
             else:
                 ROBhead+=1
-
+                
         ## Floating point ##
         elif t in ["mult.d","add.d","sub.d"]:
             Rdfloat = int(Rd[1:])
@@ -199,13 +203,14 @@ def commit(cc):
                 ROBhead = 0
             else:
                 ROBhead+=1
-            
+        numROBentries-=1
     else:
         return
     
 def writeback(cc):
-    global IntAddRs,FPAddRs,FPMultRs,LSRs
+    global IntAddRs,FPAddRs,FPMultRs,LSRs, CDBbuffer
     global IntAddFU,FPAddFU,FPAddPipeline,FPMultFU,FPMultPipeline,LSFU
+    global CDBoccupied
     
     CDBoccupied = False
     for entry in CDBbuffer:
@@ -240,7 +245,8 @@ def writeback(cc):
                 FPMultPipeline.append(FPentry)
             ## For instructions (with exception of branch) that have finished in the functional unit, write them back or hold them in the CDBbuffer
                 
-            if entry['FinalCycle'] is not None and entry['FinalCycle']+1 == cc and entry['Type'] in ['add','sub']:
+            if entry['FinalCycle'] is not None and entry['FinalCycle']+1 <= cc and entry['Type'] in ['add','sub'] and timingTable[entry['instNum']]['wb'] is None:
+                print(entry['Type'])
                 if not CDBoccupied:
                     for ROBi, ROBentry in enumerate(ROB):
                         if 'ROB'+str(ROBi) == entry['Dst']:
@@ -261,14 +267,17 @@ def writeback(cc):
                 else:
                     for CDBentry in CDBbuffer:
                         if not CDBentry['Occupied']:
-                            CDBentry=entry
+                            CDBentry['instNum'] = entry['instNum']
+                            CDBentry['Dst'] = entry['Dst']
+                            CDBentry['Value'] = entry['Value']
+                            CDBentry['Occupied'] = True
                             entry['Occupied'] = False
+
     removeFPAddPipeind=[]
     removeFPMultPipeind=[]
-    
     for FPpipe in [FPAddPipeline, FPMultPipeline]:
         for ientry, entry in enumerate(FPpipe):
-            if entry['FinalCycle'] is not None and entry['FinalCycle']+1 == cc:
+            if entry['FinalCycle'] is not None and entry['FinalCycle']+1 <= cc and timingTable[entry['instNum']]['wb'] is None:
                 if not CDBoccupied:
                     for ROBi, ROBentry in enumerate(ROB):
                         if 'ROB'+str(ROBi) == entry['Dst']:
@@ -296,8 +305,10 @@ def writeback(cc):
                 else:
                     for CDBentry in CDBbuffer:
                         if not CDBentry['Occupied']:
-                            CDBentry=entry
-                            entry['Occupied'] = False
+                            CDBentry['instNum'] = entry['instNum']
+                            CDBentry['Dst'] = entry['Dst']
+                            CDBentry['Value'] = entry['Value']
+                            CDBentry['Occupied'] = True
                             if entry['Type'] in ['add.d','sub.d']:
                                 removeFPAddPipeind.append(ientry)
                             elif entry['Type']=='mult.d':
@@ -310,13 +321,17 @@ def writeback(cc):
             
 
 
-    ##for load/store writing the address back to the LSRs
+    ##for load/store writing the memory value back to the RSs
+    removeLSRsindices=[]
     for ientry, entry in enumerate(LSRs):
         if entry['Op']=='ld':
-            if entry['MemFinalCycle'] is not None and entry['MemFinalCycle']+1 == cc:
+            if entry['MemFinalCycle'] is not None and entry['MemFinalCycle']+1 <= cc and timingTable[entry['instNum']]['wb'] is None:
+                #print(entry['Dst'])
+                #print(CDBoccupied)
                 if not CDBoccupied:
                     for ROBi, ROBentry in enumerate(ROB):
-                        if ROBentry['instNum']==entry['instNum']:
+                        if 'ROB'+str(ROBi) == entry['Dst']:
+                            #print(ROBi)
                             ROBentry['Value'] = entry['Val1']
                             ROBentry['Fin']= True
 
@@ -328,16 +343,22 @@ def writeback(cc):
                             if RSentry['Tag2']==entry['Dst']:
                                 RSentry['Val2']=entry['Val1']
                                 RSentry['Tag2']='replaced'
+
+                    timingTable[entry['instNum']]['wb'] = cc
                 else:
                     for CDBentry in CDBbuffer:
                         if not CDBentry['Occupied']:
-                            CDBentry=entry
-                            entry['Occupied'] = False
+                                CDBentry['instNum'] = entry['instNum']
+                                CDBentry['Dst'] = entry['Dst']
+                                CDBentry['Value'] = entry['Val1']
+                                CDBentry['Occupied'] = True           
 
                     
                 #entry['Occupied'] = False
-                timingTable[entry['instNum']]['wb'] = cc
-                LSRs.pop(ientry)
+                removeLSRsindices.append(ientry)
+
+    for index in sorted(removeLSRsindices, reverse=True):
+        LSRs.pop(index)
 
     ##remove any store instructions from functional if they are done
     for fu in LSFU:
@@ -371,7 +392,7 @@ def execute(cc):
     global timingTable, pc
     global IntAddRs, FPAddRs, FPMultRs, LSRs
     global IntAddFU, FPAddFU, FPMultFU, LSFU
-    global ROB,ROBtail
+    global ROB,ROBtail,lastValid
     
     if timingTable is None:
         return
@@ -427,7 +448,7 @@ def execute(cc):
                         for index in sorted(removeRSind,reverse=True):
                             rs.pop(index)
                     
-                    return True
+                    return True,min(removeinstNums)
                     
                 elif not entry['Value'] and entry['pred']:
                     ## Should not have taken, but did
@@ -474,7 +495,7 @@ def execute(cc):
 
                     ##Instruction Number is set back
                     #instNum = entry['instNum']+1
-                    return True
+                    return True,min(removeinstNums)
                     
                 else:
                     ##everything is fine, remove the RAT copies
@@ -485,20 +506,15 @@ def execute(cc):
 
                     RATcopies.pop(removedindex)
                     
-        return False
+        return False,lastValid
                     
 
 
 def issue(inst,instNum):
-    global ROB, ROBtail
+    global ROB, ROBtail,numROBentries
     global RATint, RATfloat, ARFint, ARFfloat
     global IntAddRs, FPAddRs, FPMultRs, LSRs
-    if ROBtail >= ROBhead:
-        numROBentries = ROBtail-ROBhead
-    else:
-        numROBentries = int(config['ROBentries'])-ROBhead+ROBtail
-    
-        
+
     if numROBentries<int(config['ROBentries']):
         t = (inst['Type'])
 
@@ -513,6 +529,7 @@ def issue(inst,instNum):
                     ROBtail = 0
                 else:
                     ROBtail+=1
+                    
 
             ##branch instruction
             else:
@@ -525,7 +542,7 @@ def issue(inst,instNum):
                 else:
                     ROBtail+=1
                 
-
+            numROBentries+=1
             return 1
         
         ## FP Add    
@@ -539,7 +556,7 @@ def issue(inst,instNum):
             else:
                 ROBtail+=1
             
-            
+            numROBentries+=1
             return 1
 
         elif t in ['mult.d'] and len(FPMultRs)<config['fpmult'][0]:
@@ -551,7 +568,8 @@ def issue(inst,instNum):
                 ROBtail = 0
             else:
                 ROBtail+=1
-            
+
+            numROBentries+=1
             return 1
             
             
@@ -599,14 +617,14 @@ def issue(inst,instNum):
 
                 #Only source with ROB
                 elif faName[0]=="ROB":
-                    if ROB[rsnum]['Value']==None:
+                    if ROB[fanum]['Value']==None:
                         LSRs.append({'instNum':instNum,'Op': t, 'Dst':None, 'Tag1': Fa,'Tag2': '','Val1':None,'Val2':ARFint[ranum],'offset':offset,'address':None,'FinalCycle':None,'MemFinalCycle':None})
                     else:
                         LSRs.append({'instNum':instNum,'Op': t, 'Dst':None, 'Tag1': '','Tag2': '','Val1':ROB[fanum]['Value'],'Val2':ARFint[ranum],'offset':offset,'address':None,'FinalCycle':None,'MemFinalCycle':None})
                 
                 elif raName[0]=="ROB":
 
-                    if ROB[rtnum]['Value']==None:
+                    if ROB[ranum]['Value']==None:
                         LSRs.append({'instNum':instNum,'Op': t, 'Dst':None, 'Tag1': '','Tag2': Ra,'Val1':ARFfloat[fanum],'Val2':None,'offset':offset,'address':None,'FinalCycle':None,'MemFinalCycle':None})
                     else:
                         LSRs.append({'instNum':instNum,'Op': t, 'Dst':None, 'Tag1': '','Tag2': '','Val1':ARFfloat[fanum],'Val2':ROB[ranum]['Value'],'offset':offset,'address':None,'FinalCycle':None,'MemFinalCycle':None})
@@ -620,7 +638,7 @@ def issue(inst,instNum):
                     ROBtail = 0
                 else:
                     ROBtail+=1
-
+            numROBentries+=1
             return 1
 
     else:

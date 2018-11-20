@@ -1,15 +1,17 @@
 				#OfRS		CyclesInEX			CyclesInMEM			#OfFUs
-IntAdd				3				3				0				1
+IntAdd				3				1				0				1
 FPAdd				2				4				0				1
 FPMult				1				15				0				1
 L/SUnit				5				2				6				1
 
 ROBentries	128
 CDB Buffer Entries	1
-R1=5, R2=3, F1=2.0, F2=6.0, F3=8.0
-Mem[5]=25.0
+R1=5, R2=10, F1=2.7, F2=4.8
+Mem[12]=32.0
 
+ld F3, 2(R2)
 Add R3, R2, R1
-Ld F4, 0(R3)
-Add.d F1, F4, F1
-Add.d F1, F2, F3
+Add.d F4, F1, F2
+Sub R4, R2, R1
+Mult.d F5, F1, F2
+sd F1, 2(R2)
